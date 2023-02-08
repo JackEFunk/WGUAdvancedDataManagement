@@ -1,0 +1,157 @@
+--Part B Write a SQL code that creates the tables to hold your report sections
+
+--Create detailed tables
+DROP TABLE IF EXISTS sales_genre;
+CREATE TABLE sales_genre(
+	genre_id SERIAL PRIMARY KEY,
+	category_id integer,
+	name varchar,
+	film_id integer,
+	rental_id integer,
+	amount money
+);
+
+--View table before data population
+SELECT * FROM sales_genre;
+
+--Create summary table
+DROP TABLE IF EXISTS sales_genre_summary;
+CREATE TABLE sales_genre_summary(
+	summary_genre_id SERIAL PRIMARY KEY,
+	name varchar,
+	total_sales money
+);
+
+--View table before data population
+SELECT * FROM sales_genre_summary;
+
+--Part C Write a SQL query that will extract the raw data needed for the detailed section of your report from the source database and verify the data's accuracy.
+
+--Extract data for the detailed table
+INSERT INTO sales_genre(
+	category_id,
+	name,
+	film_id,
+	inventory_id,
+	rental_id,
+	amount
+)
+SELECT category.category_id, category.name, film_category.film_id, inventory.inventory_id, rental.rental_id, payment.amount
+FROM payment
+INNER JOIN rental USING(rental_id)
+INNER JOIN inventory USING(inventory_id)
+INNER JOIN film USING(film_id)
+INNER JOIN film_category USING(film_id)
+INNER JOIN category USING(category_id)
+;
+
+--View table after data population
+SELECT * FROM sales_genre;
+
+--Part D Write code for function(s) that perform the transformation(s) you identified in part A4
+
+--I combined the transformation with the data extraction on the summary table. I am using a SUM function to aggregate the 
+--amounts into a total_sales field.
+
+--Extract and transform data into summary table
+INSERT INTO sales_genre_summary(
+	name,
+	total_sales
+)
+SELECT name, SUM(amount) AS total_sales
+FROM sales_genre
+GROUP BY name
+ORDER BY total_sales DESC
+;
+
+--View table after data population
+SELECT * FROM sales_genre_summary;
+
+--Part E Write a SQL code that creates a trigger on the detailed table of the report that will continually update the
+--summary table as data is added to the detailed table.
+
+--Create update trigger function
+CREATE OR REPLACE FUNCTION genre_sales_trigger()
+RETURNS TRIGGER AS $genre_sales_trigger$
+DECLARE
+	triggered_total_sales money;
+	triggered_name varchar;
+BEGIN
+	triggered_total_sales = NEW.amount;
+	triggered_name = NEW.name;
+UPDATE sales_genre_summary
+SET total_sales = total_sales + triggered_total_sales WHERE name = triggered_name;
+RETURN NULL;
+END;
+$genre_sales_trigger$ LANGUAGE PLPGSQL;
+
+--Create trigger
+DROP TRIGGER IF EXISTS genre_sales_trigger ON sales_genre;
+CREATE TRIGGER genre_sales_trigger
+AFTER INSERT ON sales_genre
+FOR EACH ROW EXECUTE FUNCTION genre_sales_trigger();
+
+--View table before trigger
+SELECT * FROM sales_genre_summary;
+
+--Extract data to change a record
+INSERT INTO sales_genre(
+	category_id,
+	name,
+	film_id,
+	inventory_id,
+	rental_id,
+	amount
+)
+VALUES(
+11, 'Horror', 749, 3419, 1520, 9876.21);
+
+--View table after trigger
+SELECT * FROM sales_genre_summary;
+
+--Part F Create a stored procedure that can be used to refresh the data in both your detailed and sumamry tables. The
+--procedure should clear the contents of the detailed and summary tables and perform the ETL load process from part C and
+--include comments that identify how often the stored procedure should be executed.
+
+--Create procedure to refresh data
+CREATE OR REPLACE PROCEDURE refresh_data()
+AS $$
+BEGIN
+DELETE FROM sales_genre;
+INSERT INTO sales_genre(
+	category_id,
+	name,
+	film_id,
+	inventory_id,
+	rental_id,
+	amount
+)
+SELECT category.category_id, category.name, film_categry.film_id, inventory.inventory_id, rental.rental_id, amount
+FROM payment
+INNER JOIN rental USING(rental_id)
+INNER JOIN inventory USING(inventory_id)
+INNER JOIN film USING(film_id)
+INNER JOIN film_category USING(film_id)
+INNER JOIN category USING(category_id)
+;
+DELETE FROM sales_genre_summary;
+INSERT INTO sales_genre_summary(
+	name,
+	total_sales
+)
+SELECT name, SUM(amount) AS total_sales
+FROM sales_genre
+GROUP BY name
+ORDER BY total_sales DESC;
+END;
+$$ LANGUAGE PLPGSQL;
+
+--Be sure to call procedure monthly to ensure data freshness
+--Call procedure
+CALL refresh_data();
+
+--View tables
+SELECT * FROM sales_genre;
+SELECT * FROM sales_genre_summary;
+
+leave 5 at latest, plan before that
